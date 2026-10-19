@@ -34,5 +34,4 @@ npx wrangler pages deploy . --project-name llm-cost-calc
 
 ## Before launch
 
-- Replace `hello@example.com` in the waitlist link in `index.html` with your real email or a form (e.g. Tally).
 - Add Cloudflare Web Analytics (free) in the Pages project settings.
