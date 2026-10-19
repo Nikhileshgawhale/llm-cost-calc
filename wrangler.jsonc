@@ -1,0 +1,8 @@
+{
+  // Static site served by Cloudflare Workers. Only files in ./public are published.
+  "name": "llm-cost-calc",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public"
+  }
+}
