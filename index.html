@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Cost Calculator</title>
+<meta name="description" content="Compare what a prompt costs across Claude, GPT, Gemini, Grok and DeepSeek. Per request, per day and per month, with caching and batch discounts.">
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #1a1a1a; --muted: #6b6b6b;
+    --border: #e3e3df; --accent: #2f6fed; --accent-soft: #e8efff; --best: #1d8a4e; --best-soft: #e6f5ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121212; --surface: #1c1c1c; --text: #ededed; --muted: #9a9a9a;
+      --border: #2e2e2e; --accent: #6b9bff; --accent-soft: #1d2a45; --best: #4cc884; --best-soft: #17301f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+  textarea, input[type=number] { width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: inherit; }
+  textarea { height: 168px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); margin: 8px 0 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .chip { border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 999px;
+    padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .chip[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin: 24px 0 8px; gap: 12px; flex-wrap: wrap; }
+  .toolbar h2 { font-size: 18px; margin: 0; }
+  button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 10px 12px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
+  th:first-child, td:first-child { text-align: left; }
+  tr:last-child td { border-bottom: 0; }
+  tr.best td { background: var(--best-soft); }
+  .model { font-weight: 600; }
+  .prov { font-size: 12px; color: var(--muted); }
+  .note { font-size: 12px; color: var(--muted); white-space: normal; }
+  .badge { font-size: 11px; color: var(--best); font-weight: 700; margin-left: 6px; }
+  .bar { height: 6px; background: var(--accent); border-radius: 3px; opacity: .7; min-width: 2px; }
+  .barcell { width: 18%; }
+  footer { margin-top: 24px; font-size: 12px; color: var(--muted); }
+  footer a { color: var(--muted); }
+  .cta { margin-top: 24px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px; padding: 16px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .cta a { color: var(--accent); font-weight: 600; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+    padding: 8px 14px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <h1>LLM Cost Calculator</h1>
+  <p class="sub">Paste a prompt and see what it costs on every major model, per request and per month. Your prompt never leaves your browser.</p>
+
+  <div class="grid">
+    <div class="card">
+      <label for="prompt">Your prompt (system prompt + user message)</label>
+      <textarea id="prompt" placeholder="Paste a prompt here, or type an input token count on the right…"></textarea>
+      <div class="hint" id="charInfo">0 characters</div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <label for="inTok">Input tokens per request</label>
+          <input id="inTok" type="number" min="0" step="1" value="1000">
+        </div>
+        <div>
+          <label for="outTok">Output tokens per request</label>
+          <input id="outTok" type="number" min="0" step="1" value="500">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="reqDay">Requests per day</label>
+          <input id="reqDay" type="number" min="0" step="1" value="1000">
+        </div>
+        <div>
+          <label for="cachePct">Input served from cache (%)</label>
+          <input id="cachePct" type="number" min="0" max="100" step="5" value="0">
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="batch"> Use Batch API (50% off where offered)</label>
+      <div style="margin-top:14px">
+        <label>Providers</label>
+        <div class="chips" id="providerChips"></div>
+      </div>
+      <div class="hint">Token counts from a pasted prompt are estimates (~4 characters per token). Type an exact count to override.</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <h2>Cost comparison</h2>
+    <button class="primary" id="share">Copy share link</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="name">Model</th>
+          <th data-sort="input">Input $/1M</th>
+          <th data-sort="output">Output $/1M</th>
+          <th data-sort="perReq">Per request</th>
+          <th data-sort="perDay">Per day</th>
+          <th data-sort="perMonth">Per month ▲</th>
+          <th class="barcell"></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div class="cta">
+    <span><strong>Need these numbers in your code?</strong> A pricing API and team budget alerts are coming.</span>
+    <a href="mailto:hello@example.com?subject=LLM%20Cost%20API%20waitlist">Join the waitlist →</a>
+  </div>
+
+  <footer>
+    Prices from official provider pages, last checked <span id="checked"></span>. Standard-tier, short-context rates; long prompts may cost more (see notes).
+    Always confirm on the provider's page before budgeting. Sources: <span id="sources"></span>
+  </footer>
+</main>
+<div class="toast" id="toast">Link copied</div>
+
+<script src="pricing.js"></script>
+<script>
+(function () {
+  const P = window.PRICING;
+  const $ = (id) => document.getElementById(id);
+  const els = { prompt: $("prompt"), inTok: $("inTok"), outTok: $("outTok"), reqDay: $("reqDay"),
+                cachePct: $("cachePct"), batch: $("batch"), rows: $("rows") };
+  const providers = Object.keys(P.providers);
+  let active = new Set(providers);
+  let sortKey = "perMonth", sortAsc = true;
+  let manualTokens = false;
+
+  // Restore state from the URL hash (shareable links). The prompt itself is never put in the URL.
+  const params = new URLSearchParams(location.hash.slice(1));
+  for (const k of ["inTok", "outTok", "reqDay", "cachePct"]) if (params.has(k)) els[k].value = params.get(k);
+  if (params.get("batch") === "1") els.batch.checked = true;
+  if (params.has("p")) active = new Set(params.get("p").split(",").filter((x) => providers.includes(x)));
+  if (params.has("inTok")) manualTokens = true;
+
+  // Provider filter chips
+  const chipBox = $("providerChips");
+  providers.forEach((key) => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.type = "button"; b.textContent = P.providers[key].name;
+    b.setAttribute("aria-pressed", active.has(key));
+    b.onclick = () => {
+      active.has(key) ? active.delete(key) : active.add(key);
+      b.setAttribute("aria-pressed", active.has(key));
+      render();
+    };
+    chipBox.appendChild(b);
+  });
+
+  const num = (el) => Math.max(0, parseFloat(el.value) || 0);
+  const estimateTokens = (text) => Math.ceil(text.length / 4);
+
+  function money(v) {
+    if (v === 0) return "$0";
+    if (v < 0.01) return "$" + v.toPrecision(2);
+    if (v < 1000) return "$" + v.toFixed(2);
+    return "$" + Math.round(v).toLocaleString();
+  }
+
+  const rate = (v) => "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+
+  function compute() {
+    const baseIn = num(els.inTok), out = num(els.outTok), perDayReqs = num(els.reqDay);
+    const cacheFrac = Math.min(100, num(els.cachePct)) / 100;
+    return P.models.filter((m) => active.has(m.provider)).map((m) => {
+      // Pasted prompts are re-estimated per model tokenizer; typed counts are taken as-is.
+      const inTok = manualTokens ? baseIn : Math.ceil(baseIn * m.tokenRatio);
+      const batchOn = els.batch.checked && P.providers[m.provider].batch;
+      const mult = batchOn ? 0.5 : 1;
+      const inCost = (inTok * (1 - cacheFrac) * m.input + inTok * cacheFrac * m.cached) / 1e6;
+      const outCost = (out * m.output) / 1e6;
+      const perReq = (inCost + outCost) * mult;
+      return { ...m, batchOn, perReq, perDay: perReq * perDayReqs, perMonth: perReq * perDayReqs * 30 };
+    });
+  }
+
+  function render() {
+    const list = compute();
+    list.sort((a, b) => {
+      const x = a[sortKey], y = b[sortKey];
+      const r = typeof x === "string" ? x.localeCompare(y) : x - y;
+      return sortAsc ? r : -r;
+    });
+    const max = Math.max(...list.map((r) => r.perMonth), 1e-12);
+    const min = Math.min(...list.map((r) => r.perMonth));
+    els.rows.innerHTML = list.map((r) => {
+      const best = r.perMonth === min && list.length > 1;
+      const notes = [r.note, els.batch.checked && !r.batchOn ? "No batch discount" : ""].filter(Boolean).join(" · ");
+      return `<tr class="${best ? "best" : ""}">
+        <td><div class="model">${r.name}${best ? '<span class="badge">CHEAPEST</span>' : ""}</div>
+            <div class="prov">${P.providers[r.provider].name} · <code>${r.id}</code></div>
+            ${notes ? `<div class="note">${notes}</div>` : ""}</td>
+        <td>${rate(r.input)}</td><td>${rate(r.output)}</td>
+        <td>${money(r.perReq)}</td><td>${money(r.perDay)}</td><td><strong>${money(r.perMonth)}</strong></td>
+        <td class="barcell"><div class="bar" style="width:${(r.perMonth / max) * 100}%"></div></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="7">Pick at least one provider.</td></tr>`;
+    document.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.sort === sortKey ? (sortAsc ? " ▲" : " ▼") : "");
+    });
+  }
+
+  els.prompt.addEventListener("input", () => {
+    const t = els.prompt.value;
+    $("charInfo").textContent = `${t.length.toLocaleString()} characters ≈ ${estimateTokens(t).toLocaleString()} tokens`;
+    if (t.length) { manualTokens = false; els.inTok.value = estimateTokens(t); }
+    render();
+  });
+  els.inTok.addEventListener("input", () => { manualTokens = true; render(); });
+  for (const k of ["outTok", "reqDay", "cachePct", "batch"]) els[k].addEventListener("input", render);
+
+  document.querySelectorAll("th[data-sort]").forEach((th) => th.addEventListener("click", () => {
+    const k = th.dataset.sort;
+    sortAsc = sortKey === k ? !sortAsc : true;
+    sortKey = k;
+    render();
+  }));
+
+  $("share").addEventListener("click", async () => {
+    const q = new URLSearchParams({ inTok: els.inTok.value, outTok: els.outTok.value, reqDay: els.reqDay.value,
+      cachePct: els.cachePct.value, batch: els.batch.checked ? "1" : "0", p: [...active].join(",") });
+    const url = location.origin + location.pathname + "#" + q.toString();
+    history.replaceState(null, "", url);
+    try { await navigator.clipboard.writeText(url); } catch (e) {}
+    const t = $("toast"); t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1500);
+  });
+
+  $("checked").textContent = P.lastChecked;
+  $("sources").innerHTML = providers.map((k) => `<a href="${P.providers[k].source}" target="_blank" rel="noopener">${P.providers[k].name}</a>`).join(", ");
+  render();
+})();
+</script>
+</body>
+</html>
